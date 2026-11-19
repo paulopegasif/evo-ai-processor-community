@@ -37,6 +37,39 @@ from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
+
+# INOVE fork (2026-11-18): HTTP tools were registered as `http_tool(**kwargs)`,
+# so the LLM saw no parameters and every call sent the configured description
+# text instead of a real value. Give each tool an explicit signature built from
+# its path/query/body params so ADK declares them to the model.
+import inspect as _inspect
+
+_BODY_TYPES = {"string": str, "number": float, "integer": int, "boolean": bool}
+
+
+def build_http_tool_signature(path_params, query_params, body_params):
+    params, seen = [], set()
+
+    def add(name, ann, required):
+        if not isinstance(name, str) or not name.isidentifier() or name in seen or name == "tool_context":
+            return
+        seen.add(name)
+        if required:
+            params.append(_inspect.Parameter(name, _inspect.Parameter.KEYWORD_ONLY, annotation=ann))
+        else:
+            params.append(_inspect.Parameter(name, _inspect.Parameter.KEYWORD_ONLY, default=None, annotation=Optional[ann]))
+
+    for name in (path_params or {}):
+        add(name, str, True)
+    for name, value in (query_params or {}).items():
+        if isinstance(value, list):
+            continue  # fixed list values are not chosen by the model
+        add(name, str, False)
+    for name, cfg in (body_params or {}).items():
+        cfg = cfg if isinstance(cfg, dict) else {}
+        add(name, _BODY_TYPES.get(str(cfg.get("type", "string")).lower(), str), bool(cfg.get("required", False)))
+    return _inspect.Signature(params)
+
 # The Custom Tools wizard parks the "what it receives / what it returns"
 # descriptions inside `values` under a reserved key. It is documentation, never
 # a request parameter — it must not reach the wire as a query param or a body
@@ -203,6 +236,7 @@ class CustomToolBuilder:
 
         # Defines the function name to be used by the ADK
         http_tool.__name__ = name
+        http_tool.__signature__ = build_http_tool_signature(path_params, query_params, body_params)
 
         return FunctionTool(func=http_tool)
 

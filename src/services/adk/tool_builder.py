@@ -33,7 +33,7 @@ import requests
 import json
 import urllib.parse
 from src.utils.logger import setup_logger
-from src.services.adk.custom_tools import CustomToolBuilder, strip_modes_meta
+from src.services.adk.custom_tools import CustomToolBuilder, strip_modes_meta, build_http_tool_signature
 from src.services.adk.tools import exit_loop
 from src.services.adk.tools import create_text_to_speech_tool
 
@@ -220,6 +220,7 @@ class ToolBuilder:
 
         # Defines the function name to be used by the ADK
         http_tool.__name__ = name
+        http_tool.__signature__ = build_http_tool_signature(path_params, query_params, body_params)
 
         return FunctionTool(func=http_tool)
 
